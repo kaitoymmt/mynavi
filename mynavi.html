@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>首都高周回ナビ (横浜西区発版)</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+            background: #121212;
+            color: #ffffff;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        .card {
+            background: #1e1e1e;
+            border-radius: 20px;
+            padding: 30px 24px;
+            width: 100%;
+            max-width: 440px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+            text-align: center;
+            box-sizing: border-box;
+            border: 1px solid #2e2e2e;
+        }
+        h1 { 
+            font-size: 1.6rem; 
+            margin-top: 0; 
+            margin-bottom: 24px;
+            color: #00e676; 
+            letter-spacing: 1px;
+        }
+        .nav-instruction { 
+            font-size: 2rem; 
+            font-weight: bold; 
+            margin: 24px 0 12px 0; 
+            min-height: 70px;
+            color: #ffffff;
+            line-height: 1.3;
+        }
+        .next-info { 
+            font-size: 1.1rem; 
+            color: #b0bec5; 
+            margin-bottom: 30px; 
+            min-height: 60px;
+            line-height: 1.5;
+            padding: 0 10px;
+        }
+        button {
+            background: #00e676;
+            color: #121212;
+            border: none;
+            padding: 16px 24px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            border-radius: 12px;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(0, 230, 118, 0.3);
+        }
+        button:active {
+            transform: scale(0.98);
+            box-shadow: 0 2px 6px rgba(0, 230, 118, 0.3);
+        }
+        button:disabled { 
+            background: #424242; 
+            color: #757575;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+        .status { 
+            font-size: 0.85rem; 
+            color: #757575; 
+            margin-top: 25px; 
+            border-top: 1px solid #2e2e2e;
+            padding-top: 15px;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h1>首都高周回ナビ</h1>
+    <button id="startBtn">ナビゲーション開始</button>
+    
+    <div class="nav-instruction" id="instruction">「開始」を押してください</div>
+    <div class="next-info" id="nextInfo">横浜（みなとみらい）から東京を回って横浜駅西口へ戻るルートを案内します。</div>
+    
+    <div class="status" id="gpsStatus">GPS: 未接続<br>※実際の走行時はスマホの画面常時点灯を推奨</div>
+</div>
+
+<script>
+// 周回ルートのチェックポイント設定（JCT・出入口の座標）
+const routePoints = [
+    { name: "みなとみらい入口", lat: 35.4565726, lng: 139.6271715, hint: "首都高 K1 横羽線上りに進入してください。" },
+    { name: "浜崎橋JCT", lat: 35.6482, lng: 139.7607, hint: "右側車線へ進み、C1 都心環状線（内回り）銀座・江戸橋方面へ進みます。" },
+    { name: "箱崎JCT", lat: 35.6814487, lng: 139.7861543, hint: "左側車線へ寄り、9号 深川線（江東・湾岸線方面）へ分岐します。" },
+    { name: "辰巳JCT", lat: 35.6433636, lng: 139.8093821, hint: "突き当たりを右方向、B 湾岸線（下り）羽田・横浜方面へ進みます。" },
+    { name: "大黒JCT", lat: 35.4619051, lng: 139.6805121, hint: "そのまま湾岸線を直進、または大黒PAで休憩可能です。" },
+    { name: "石川町JCT", lat: 35.4394, lng: 139.6431, hint: "K1 横羽線・横浜駅方面へ進み、次の横浜駅西口で降りる準備をします。" },
+    { name: "横浜駅西口出口", lat: 35.4685659, lng: 139.6168013, hint: "ここで終了です。お疲れ様でした！ETC最安料金（300円）が適用されます。" }
+];
+
+let currentStep = 0;
+let watchId = null;
+
+const startBtn = document.getElementById('startBtn');
+const instructionText = document.getElementById('instruction');
+const nextInfoText = document.getElementById('nextInfo');
+const gpsStatusText = document.getElementById('gpsStatus');
+
+// 音声読み上げ関数
+function speak(text) {
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel(); // 動作中の音声をクリア
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ja-JP';
+        utterance.rate = 1.0; // 通常の速度
+        window.speechSynthesis.speak(utterance);
+    }
+}
+
+// 2点間の距離を計算（ヒュベニの公式の簡易版: 単位メートル）
+function getDistance(lat1, lng1, lat2, lng2) {
+    const r = 6378137; // 地球の赤道半径
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng/2) * Math.sin(dLng/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return r * c;
+}
+
+// ナビ画面と音声の更新
+function updateNavigation() {
+    if (currentStep >= routePoints.length) {
+        instructionText.innerText = "ゴールに到着しました！";
+        nextInfoText.innerText = "ドライブ終了です。安全運転をお続けください。";
+        speak("目的地周辺に到着しました。ナビゲーションを終了します。お疲れ様でした。");
+        if (watchId) navigator.geolocation.clearWatch(watchId);
+        return;
+    }
+
+    const currentPoint = routePoints[currentStep];
+    instructionText.innerText = `次は：${currentPoint.name}`;
+    nextInfoText.innerText = currentPoint.hint;
+    
+    // 次の目的地を案内
+    speak(`次は、${currentPoint.name}です。${currentPoint.hint}`);
+}
+
+// ナビゲーション開始イベント
+startBtn.addEventListener('click', () => {
+    if (!navigator.geolocation) {
+        alert("お使いのブラウザや端末はGPSに対応していません。");
+        return;
+    }
+
+    // iOS等での音声再生制限解除のため、クリックイベント内で一度空の発話を通す
+    if ('speechSynthesis' in window) {
+        const u = new SpeechSynthesisUtterance("");
+        window.speechSynthesis.speak(u);
+    }
+
+    startBtn.disabled = true;
+    startBtn.innerText = "ナビゲーション中...";
+    currentStep = 0;
+    updateNavigation();
+
+    // 位置情報の監視を開始
+    watchId = navigator.geolocation.watchPosition(
+        (position) => {
+            const userLat = position.coords.latitude;
+            const userLng = position.coords.longitude;
+            const accuracy = position.coords.accuracy;
+            gpsStatusText.innerHTML = `GPS受光中 (精度: ±${Math.round(accuracy)}m)<br>現在の座標: ${userLat.toFixed(4)}, ${userLng.toFixed(4)}`;
+
+            if (currentStep < routePoints.length) {
+                const target = routePoints[currentStep];
+                const distance = getDistance(userLat, userLng, target.lat, target.lng);
+
+                // 高速道路での通過を考慮し、判定半径を500メートルに設定
+                if (distance < 500) {
+                    currentStep++;
+                    updateNavigation();
+                }
+            }
+        },
+        (error) => {
+            let errorMsg = "位置情報を取得できません";
+            if (error.code === 1) errorMsg = "位置情報の利用が許可されていません";
+            gpsStatusText.innerHTML = `<span style="color:#ff5252;">GPSエラー: ${errorMsg}</span>`;
+            console.error(error);
+        },
+        {
+            enableHighAccuracy: true, // 高精度モード必須
+            timeout: 15000,
+            maximumAge: 0
+        }
+    );
+});
+</script>
+</body>
+</html>
