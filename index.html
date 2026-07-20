@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>首都高周回ナビ (高精度ルート版)</title>
+    <title>首都高周回ナビ (道なりリアルタイム追跡版)</title>
     <!-- Leaflet.js (地図表示用ライブラリ) の読み込み -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -83,109 +83,101 @@
 <body>
 
 <div class="nav-panel">
-    <h1>首都高周回ナビ (高精度版)</h1>
+    <h1>首都高周回ナビ (道なり＆リアルタイム追跡)</h1>
     <div class="nav-instruction" id="instruction">「開始」を押してください</div>
-    <div class="next-info" id="nextInfo">GPSの判定半径を各JCTの構造に合わせて最適化しました。</div>
+    <div class="next-info" id="nextInfo">現在地を常にマップ中心にロックし、道なりに案内します。</div>
     <button id="startBtn">ナビゲーション開始</button>
 </div>
 
 <div id="map"></div>
 
 <div class="status-bar" id="gpsStatus">
-    GPS: 未接続 | 高架下や並走一般道での誤判定を防ぐロジックが有効です
+    GPS: 未接続 | リアルタイムトラッキング無効
 </div>
 
 <script>
-// 【高精度チューニング】各JCTの実際の物理的な中心座標と、最適な判定半径(radius)を設定
+// ナビゲーション用のチェックポイント
 const routePoints = [
-    { 
-        name: "みなとみらい入口", 
-        lat: 35.4578, lng: 139.6310, radius: 400,
-        hint: "首都高 K1 横羽線（上り）に入ります。左車線から本線へ合流してください。" 
-    },
-    { 
-        name: "生麦JCT手前", 
-        lat: 35.4925, lng: 139.6730, radius: 600,
-        hint: "このまま K1 横羽線を直進し、羽田・東京方面へ進みます。" 
-    },
-    { 
-        name: "羽田可動橋付近 (K1)", 
-        lat: 35.5495, lng: 139.7510, radius: 700,
-        hint: "まもなく東京都内に入ります。右側車線をキープして平和島方面へ。" 
-    },
-    { 
-        name: "浜崎橋JCT", 
-        lat: 35.6486, lng: 139.7613, radius: 350,
-        hint: "右側2車線へ進み、「C1 都心環状線（内回り）銀座・江戸橋方面」へ分岐します。" 
-    },
-    { 
-        name: "江戸橋JCT", 
-        lat: 35.6817, lng: 139.7766, radius: 350,
-        hint: "右側の「C1 向島・箱崎方面」の車線を維持してください。" 
-    },
-    { 
-        name: "箱崎JCT", 
-        lat: 35.6812, lng: 139.7865, radius: 300,
-        hint: "左側の「9号 深川線・湾岸線方面」へ分岐します。ロータリー構造に入りますがそのまま9号線へ。" 
-    },
-    { 
-        name: "辰巳JCT", 
-        lat: 35.6436, lng: 139.8094, radius: 400,
-        hint: "9号線の突き当たりを「右方向、B 湾岸線（下り）羽田・横浜方面」へ進みます。" 
-    },
-    { 
-        name: "東海JCT付近 (湾岸線)", 
-        lat: 35.5685, lng: 139.7645, radius: 700,
-        hint: "湾岸線を直進します。羽田空港のトンネルを通過します。" 
-    },
-    { 
-        name: "大黒JCT", 
-        lat: 35.4615, lng: 139.6808, radius: 450,
-        hint: "横浜ベイブリッジを渡るため、そのまま湾岸線を直進してください。大黒PAへも入れます。" 
-    },
-    { 
-        name: "本牧JCT", 
-        lat: 35.4290, lng: 139.6705, radius: 500,
-        hint: "ベイブリッジ通過後、左側車線へ寄り「K3 狩場線・石川町JCT方面」へ進みます。" 
-    },
-    { 
-        name: "石川町JCT", 
-        lat: 35.4395, lng: 139.6425, radius: 350,
-        hint: "JCTを「右方向、K1 横羽線・横浜駅方面」へ進み、すぐに出口の準備をします。" 
-    },
-    { 
-        name: "横浜駅西口出口", 
-        lat: 35.4688, lng: 139.6165, radius: 350,
-        hint: "ここで首都高を降ります。一般道へ合流します。お疲れ様でした！" 
-    }
+    { name: "みなとみらい入口", lat: 35.4578, lng: 139.6310, radius: 400, hint: "首都高 K1 横羽線（上り）に入ります。左車線から本線へ合流してください。" },
+    { name: "生麦JCT手前", lat: 35.4925, lng: 139.6730, radius: 600, hint: "このまま K1 横羽線を直進し、羽田・東京方面へ進みます。" },
+    { name: "羽田可動橋付近 (K1)", lat: 35.5495, lng: 139.7510, radius: 700, hint: "まもなく東京都内に入ります。右側車線をキープして平和島方面へ。" },
+    { name: "浜崎橋JCT", lat: 35.6486, lng: 139.7613, radius: 350, hint: "右側2車線へ進み、「C1 都心環状線（内回り）銀座・江戸橋方面」へ分岐します。" },
+    { name: "江戸橋JCT", lat: 35.6817, lng: 139.7766, radius: 350, hint: "右側の「C1 向島・箱崎方面」の車線を維持してください。" },
+    { name: "箱崎JCT", lat: 35.6812, lng: 139.7865, radius: 300, hint: "左側の「9号 深川線・湾岸線方面」へ分岐します。ロータリー構造に入りますがそのまま9号線へ。" },
+    { name: "辰巳JCT", lat: 35.6436, lng: 139.8094, radius: 400, hint: "9号線の突き当たりを「右方向、B 湾岸線（下り）羽田・横浜方面」へ進みます。" },
+    { name: "東海JCT付近 (湾岸線)", lat: 35.5685, lng: 139.7645, radius: 700, hint: "湾岸線を直進します。羽田空港のトンネルを通過します。" },
+    { name: "大黒JCT", lat: 35.4615, lng: 139.6808, radius: 450, hint: "横浜ベイブリッジを渡るため、そのまま湾岸線を直進してください。大黒PAへも入れます。" },
+    { name: "本牧JCT", lat: 35.4290, lng: 139.6705, radius: 500, hint: "ベイブリッジ通過後、左側車線へ寄り「K3 狩場線・石川町JCT方面」へ進みます。" },
+    { name: "石川町JCT", lat: 35.4395, lng: 139.6425, radius: 350, hint: "JCTを「右方向、K1 横羽線・横浜駅方面」へ進み、すぐに出口の準備をします。" },
+    { name: "横浜駅西口出口", lat: 35.4688, lng: 139.6165, radius: 350, hint: "ここで首都高を降ります。一般道へ合流します。お疲れ様でした！" }
+];
+
+// 「道なり」にラインを描画するための補間用形状データ（首都高の主要路線に沿った大まかなカーブを再現）
+const roadPathCoordinates = [
+    [35.4578, 139.6310], // みなとみらい
+    [35.4640, 139.6350], [35.4750, 139.6450], [35.4850, 139.6580],
+    [35.4925, 139.6730], // 生麦JCT
+    [35.5020, 139.6900], [35.5150, 139.7150], [35.5300, 139.7350],
+    [35.5495, 139.7510], // 羽田可動橋
+    [35.5700, 139.7420], [35.6000, 139.7450], [35.6250, 139.7520],
+    [35.6486, 139.7613], // 浜崎橋JCT
+    [35.6600, 139.7750], [35.6720, 139.7780],
+    [35.6817, 139.7766], // 江戸橋JCT
+    [35.6830, 139.7820],
+    [35.6812, 139.7865], // 箱崎JCT
+    [35.6750, 139.7950], [35.6600, 139.8020],
+    [35.6436, 139.8094], // 辰巳JCT
+    [35.6250, 139.7900], [35.5950, 139.7780],
+    [35.5685, 139.7645], // 東海JCT
+    [35.5350, 139.7800], [35.5000, 139.7450],
+    [35.4615, 139.6808], // 大黒JCT
+    [35.4450, 139.6680],
+    [35.4290, 139.6705], // 本牧JCT
+    [35.4330, 139.6550],
+    [35.4395, 139.6425], // 石川町JCT
+    [35.4500, 139.6250], [35.4600, 139.6180],
+    [35.4688, 139.6165]  // 横浜駅西口
 ];
 
 let currentStep = 0;
 let watchId = null;
-let map, userMarker;
+let map, userMarker, userAccuracyCircle;
 let pointMarkers = [];
 let routeLine;
 
+const instructionText = document.getElementById('instruction');
+const nextInfoText = document.getElementById('nextInfo');
+const gpsStatusText = document.getElementById('gpsStatus');
+const startBtn = document.getElementById('startBtn');
+
 function initMap() {
+    // 横浜〜東京が収まる初期位置
     map = L.map('map', { zoomControl: false }).setView([35.56, 139.72], 11);
     
+    // スタイリッシュで運転中に見やすいダークモードタイル
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         subdomains: 'abcd',
         maxZoom: 20
     }).addTo(map);
 
-    const latlngs = routePoints.map(p => [p.lat, p.lng]);
-    routeLine = L.polyline(latlngs, { color: '#00e676', weight: 4, opacity: 0.5, dashArray: '5, 10' }).addTo(map);
+    // 道なりの太いルートラインを描画
+    routeLine = L.polyline(roadPathCoordinates, { 
+        color: '#00e676', 
+        weight: 6, 
+        opacity: 0.7,
+        lineJoin: 'round'
+    }).addTo(map);
 
+    // 各案内地点のマーカーを設置
     routePoints.forEach((p, index) => {
-        // 各JCTの検知範囲を薄い円で可視化（デバッグ・確認用）
+        // 検知エリアの視覚化
         L.circle([p.lat, p.lng], {
             radius: p.radius,
             color: '#00b0ff',
             weight: 1,
             fillColor: '#00b0ff',
-            fillOpacity: 0.05
+            fillOpacity: 0.04
         }).addTo(map);
 
         const marker = L.circleMarker([p.lat, p.lng], {
@@ -209,7 +201,6 @@ function safeSpeak(text) {
     }
 }
 
-// 2点間の距離計算 (メートル)
 function getDistance(lat1, lng1, lat2, lng2) {
     const r = 6378137;
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -223,7 +214,7 @@ function getDistance(lat1, lng1, lat2, lng2) {
 
 function updateNavigation() {
     pointMarkers.forEach((m, idx) => {
-        m.setStyle({ fillColor: idx < currentStep ? '#757575' : '#00b0ff' });
+        m.setStyle({ fillColor: idx < currentStep ? '#757575' : '#00b0ff', radius: idx === currentStep ? 9 : 6 });
     });
 
     if (currentStep >= routePoints.length) {
@@ -239,7 +230,7 @@ function updateNavigation() {
     nextInfoText.innerText = currentPoint.hint;
     
     if (pointMarkers[currentStep]) {
-        pointMarkers[currentStep].setStyle({ fillColor: '#ff9100', radius: 9 });
+        pointMarkers[currentStep].setStyle({ fillColor: '#ff9100' });
     }
     
     safeSpeak(`次は、${currentPoint.name}です。${currentPoint.hint}`);
@@ -247,47 +238,51 @@ function updateNavigation() {
 
 startBtn.addEventListener('click', () => {
     if (!navigator.geolocation) {
-        alert("GPSに対応していません。");
+        alert("お使いの端末はGPSに対応していません。");
         return;
     }
 
-    safeSpeak(""); // iOS音声アクティベーション
+    safeSpeak(""); // iOS用の音声登録トリガー
 
     startBtn.disabled = true;
-    startBtn.innerText = "高精度ナビ中...";
+    startBtn.innerText = "リアルタイム追跡中...";
     currentStep = 0;
     updateNavigation();
 
+    // リアルタイム追跡の開始
     watchId = navigator.geolocation.watchPosition(
         (position) => {
             const userLat = position.coords.latitude;
             const userLng = position.coords.longitude;
             const accuracy = position.coords.accuracy;
-            const speed = position.coords.speed; // m/s (取得できない場合はnull)
+            const speed = position.coords.speed; // m/s
 
-            gpsStatusText.innerHTML = `GPS精度: ±${Math.round(accuracy)}m | 速度: ${speed ? Math.round(speed * 3.6) : '--'} km/h`;
+            const speedKmh = speed ? Math.round(speed * 3.6) : 0;
+            gpsStatusText.innerHTML = `GPS精度: ±${Math.round(accuracy)}m | 速度: ${speedKmh} km/h`;
 
-            // 【高精度化ロジック1】GPSの精度が極端に悪い(100m以上ズレている)データはノイズとして弾く
+            // 精度が著しく低いデータはスキップ
             if (accuracy > 100) return;
 
+            // 自車位置マーカーの同期
             if (!userMarker) {
                 userMarker = L.marker([userLat, userLng]).addTo(map);
+                userAccuracyCircle = L.circle([userLat, userLng], { radius: accuracy, color: '#00e676', weight: 1, fillOpacity: 0.1 }).addTo(map);
             } else {
                 userMarker.setLatLng([userLat, userLng]);
+                userAccuracyCircle.setLatLng([userLat, userLng]).setRadius(accuracy);
             }
             
+            // 【最重要】現在地を道なりに自動追従 (オートセンター)
             map.setView([userLat, userLng], 14);
 
+            // ルート判定
             if (currentStep < routePoints.length) {
                 const target = routePoints[currentStep];
                 const distance = getDistance(userLat, userLng, target.lat, target.lng);
 
-                // 【高精度化ロジック2】各地点ごとに最適化した個別半径(target.radius)で進入判定
                 if (distance < target.radius) {
-                    
-                    // 【高精度化ロジック3】一般道並走エリア(みなとみらい・横浜駅等)での誤認識防止
-                    // 高速走行中(時速40km以上)か、またはJCT直下にいる場合のみ通過とする
-                    if (target.name.includes("入口") || target.name.includes("出口") || speed === null || speed * 3.6 > 40) {
+                    // 一般道誤判定防止ロジック
+                    if (target.name.includes("入口") || target.name.includes("出口") || speed === null || speedKmh > 35) {
                         currentStep++;
                         updateNavigation();
                     }
@@ -295,12 +290,12 @@ startBtn.addEventListener('click', () => {
             }
         },
         (error) => {
-            gpsStatusText.innerText = "GPS信号を検索中、またはロストしました...";
+            gpsStatusText.innerText = "GPS信号を検索中...";
             console.error(error);
         },
         {
-            enableHighAccuracy: true,
-            timeout: 5000, // レスポンス速度を上げるためタイムアウトを短縮
+            enableHighAccuracy: true, // 高精度GPSモード
+            timeout: 6000,
             maximumAge: 0
         }
     );
